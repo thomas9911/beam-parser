@@ -34,16 +34,25 @@ enum BeamChunkType {
     AtU8(AtomChunk),
     #[deku(id = "[b'E', b'x', b'p', b'T']")]
     Export(ExportChunk),
+    #[deku(id = "[b'I', b'm', b'p', b'T']")]
+    Import(ImportChunk),
+    #[deku(id = "[b'C',  b'o', b'd', b'e']")]
+    Code(CodeChunk),
+    #[deku(id = "[b'S',  b't', b'r', b'T']")]
+    StringTable(StringChunk),
     #[deku(id_pat = "_")]
     Other([u8; 4]),
 }
 
 impl BeamChunkType {
     fn name(&self) -> &str {
-         match self {
+        match self {
             BeamChunkType::AtU8(_) => "AtU8",
             BeamChunkType::Export(_) => "ExpT",
-            BeamChunkType::Other(id) => unsafe {std::str::from_utf8_unchecked(id.as_slice())},
+            BeamChunkType::Import(_) => "ExpT",
+            BeamChunkType::Code(_) => "Code",
+            BeamChunkType::StringTable(_) => "StrT",
+            BeamChunkType::Other(id) => unsafe { std::str::from_utf8_unchecked(id.as_slice()) },
         }
     }
 }
@@ -69,7 +78,7 @@ struct AtomChunkItem {
 impl AtomChunkItem {
     pub fn name(&self) -> &str {
         // technically this should aways succeed, but maybe for external data we probably need to verify it (or use utf8_lossy)
-        unsafe {std::str::from_utf8_unchecked(&self.name)}
+        unsafe { std::str::from_utf8_unchecked(&self.name) }
     }
 }
 
@@ -91,12 +100,52 @@ struct ExportChunkItem {
     label: u32,
 }
 
+#[derive(Debug, PartialEq, DekuRead, DekuWrite)]
+#[deku(endian = "big")]
+struct ImportChunk {
+    size: u32,
+    import_count: u32,
+    #[deku(count = "import_count")]
+    #[deku(pad_bytes_after = "(4 * ((size+3) / 4)) - size")]
+    functions: Vec<ImportChunkItem>,
+}
+
+#[derive(Debug, PartialEq, DekuRead, DekuWrite)]
+#[deku(endian = "endian", ctx = "endian: deku::ctx::Endian")]
+struct ImportChunkItem {
+    module_index: u32,
+    function_index: u32,
+    arity: u32,
+}
+
+#[derive(Debug, PartialEq, DekuRead, DekuWrite)]
+#[deku(endian = "big")]
+struct CodeChunk {
+    size: u32,
+    sub_size: u32,
+    instruction_set: u32,
+    op_code_max: u32,
+    label_count: u32,
+    function_count: u32,
+    #[deku(count = "size - sub_size - 4")]
+    #[deku(pad_bytes_after = "(4 * ((size+3) / 4)) - size")]
+    instructions: Vec<u8>,
+}
+
+#[derive(Debug, PartialEq, DekuRead, DekuWrite)]
+#[deku(endian = "big")]
+struct StringChunk {
+    size: u32,
+    #[deku(count = "size")]
+    #[deku(pad_bytes_after = "(4 * ((size+3) / 4)) - size")]
+    data: Vec<u8>,
+}
+
 fn parse_beam(bytes: &[u8]) {
     let (mut needle, header) = BeamHeader::from_bytes((&bytes, 0)).unwrap();
     dbg!(header);
-    
-    while let Ok((mut next_needle, chunk)) = BeamChunkType::from_bytes(needle) {
 
+    while let Ok((mut next_needle, chunk)) = BeamChunkType::from_bytes(needle) {
         match chunk {
             BeamChunkType::AtU8(atoms) => {
                 dbg!(atoms.number_of_atoms);
@@ -112,7 +161,24 @@ fn parse_beam(bytes: &[u8]) {
                     dbg!(func.label);
                 }
             }
-            // continue: https://blog.stenmans.org/theBeamBook/#import_table_chunk
+            BeamChunkType::Import(import) => {
+                dbg!(import.import_count);
+                for func in import.functions {
+                    dbg!(func.module_index);
+                    dbg!(func.function_index);
+                    dbg!(func.arity);
+                }
+            }
+            BeamChunkType::Code(code) => {
+                dbg!(code.function_count);
+                dbg!(code.instruction_set);
+                dbg!(code.label_count);
+                dbg!(code.op_code_max);
+            }
+            BeamChunkType::StringTable(strt) => {
+                dbg!(strt.data);
+            }
+            // continue: https://blog.stenmans.org/theBeamBook/#_literal_table_chunk
             BeamChunkType::Other(id) => {
                 let tmp = GenericBeamChunk::from_bytes(next_needle).unwrap();
                 dbg!(chunk.name());
@@ -147,7 +213,6 @@ fn parse_beam_header_invalid_beam_magic() {
 fn parse_beam_test() {
     let beam_bytes = std::fs::read("Elixir.Test.beam").unwrap();
     parse_beam(&beam_bytes);
-
 
     panic!()
 }
