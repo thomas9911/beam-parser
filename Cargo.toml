@@ -5,3 +5,5 @@ edition = "2024"
 
 [dependencies]
 deku = "0.20.3"
+erlang-term = {version = "1.1.0", features = ["zlib"]}
+flate2 = "1.1.9"

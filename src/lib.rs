@@ -40,6 +40,8 @@ enum BeamChunkType {
     Code(CodeChunk),
     #[deku(id = "[b'S',  b't', b'r', b'T']")]
     StringTable(StringChunk),
+    #[deku(id = "[b'L',  b'i', b't', b'T']")]
+    LiteralTable(LiteralChunk),
     #[deku(id_pat = "_")]
     Other([u8; 4]),
 }
@@ -52,6 +54,7 @@ impl BeamChunkType {
             BeamChunkType::Import(_) => "ExpT",
             BeamChunkType::Code(_) => "Code",
             BeamChunkType::StringTable(_) => "StrT",
+            BeamChunkType::LiteralTable(_) => "LitT",
             BeamChunkType::Other(id) => unsafe { std::str::from_utf8_unchecked(id.as_slice()) },
         }
     }
@@ -141,6 +144,54 @@ struct StringChunk {
     data: Vec<u8>,
 }
 
+#[derive(Debug, PartialEq, DekuRead, DekuWrite)]
+#[deku(endian = "big")]
+struct LiteralChunk {
+    size: u32,
+    uncompressed_size: u32,
+    #[deku(count = "size")]
+    #[deku(pad_bytes_after = "(4 * ((size+3) / 4)) - size")]
+    // data: CompressedLiteralsChunk,
+    data: Vec<u8>,
+}
+
+impl LiteralChunk {
+    pub fn uncompress(&self) -> UnCompressedLiteralsChunk {
+        let mut decompressor = flate2::Decompress::new(true);
+        let mut buffer = Vec::with_capacity(self.uncompressed_size as usize);
+        decompressor
+            .decompress_vec(&self.data, &mut buffer, flate2::FlushDecompress::None)
+            .expect("invalid zlib data");
+
+        let (needle, literals_chunk) = UnCompressedLiteralsChunk::from_bytes((&buffer, 0))
+            .expect("illegal compress literal chunk");
+
+        literals_chunk
+    }
+}
+
+#[derive(Debug, PartialEq, DekuRead, DekuWrite)]
+#[deku(endian = "big")]
+struct UnCompressedLiteralsChunk {
+    count: u32,
+    #[deku(count = "count")]
+    literal: Vec<UnCompressedLiteralChunk>,
+}
+
+#[derive(Debug, PartialEq, DekuRead, DekuWrite)]
+#[deku(endian = "endian", ctx = "endian: deku::ctx::Endian")]
+struct UnCompressedLiteralChunk {
+    size: u32,
+    #[deku(count = "size")]
+    literal: Vec<u8>,
+}
+
+impl UnCompressedLiteralChunk {
+    pub fn as_raw_term(&self) -> erlang_term::RawTerm {
+        erlang_term::RawTerm::from_bytes(&self.literal).unwrap()
+    }
+}
+
 fn parse_beam(bytes: &[u8]) {
     let (mut needle, header) = BeamHeader::from_bytes((&bytes, 0)).unwrap();
     dbg!(header);
@@ -177,6 +228,12 @@ fn parse_beam(bytes: &[u8]) {
             }
             BeamChunkType::StringTable(strt) => {
                 dbg!(strt.data);
+            }
+            BeamChunkType::LiteralTable(litt) => {
+                let uncompressed = litt.uncompress();
+                for item in uncompressed.literal {
+                    dbg!(item.as_raw_term());
+                }
             }
             // continue: https://blog.stenmans.org/theBeamBook/#_literal_table_chunk
             BeamChunkType::Other(id) => {
