@@ -2,6 +2,11 @@ use std::borrow::Cow;
 
 use deku::prelude::*;
 
+use crate::{instructions::Tag, op_codes::OpCode};
+
+mod instructions;
+mod op_codes;
+
 #[derive(Debug, PartialEq, DekuRead, DekuWrite, DekuSize)]
 #[deku(endian = "big")]
 #[deku(magic = b"FOR1")]
@@ -135,6 +140,17 @@ struct CodeChunk {
     instructions: Vec<u8>,
 }
 
+impl CodeChunk {
+    fn interpret_instructions(&self) {
+        let bytes = &self.instructions;
+        for byte in bytes {
+            let op_code = OpCode::try_from(*byte).ok();
+            let tag = Tag::from_bytes((&[*byte], 0)).ok().map(|(_, x)| x);
+            dbg!(op_code, tag);
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, DekuRead, DekuWrite)]
 #[deku(endian = "big")]
 struct StringChunk {
@@ -198,53 +214,63 @@ fn parse_beam(bytes: &[u8]) {
 
     while let Ok((mut next_needle, chunk)) = BeamChunkType::from_bytes(needle) {
         match chunk {
-            BeamChunkType::AtU8(atoms) => {
-                dbg!(atoms.number_of_atoms);
-                for atom in atoms.atoms {
-                    dbg!(atom.name());
-                }
-            }
-            BeamChunkType::Export(export) => {
-                dbg!(export.export_count);
-                for func in export.functions {
-                    dbg!(func.function_index);
-                    dbg!(func.arity);
-                    dbg!(func.label);
-                }
-            }
-            BeamChunkType::Import(import) => {
-                dbg!(import.import_count);
-                for func in import.functions {
-                    dbg!(func.module_index);
-                    dbg!(func.function_index);
-                    dbg!(func.arity);
-                }
-            }
+            // BeamChunkType::AtU8(atoms) => {
+            //     dbg!(atoms.number_of_atoms);
+            //     for atom in atoms.atoms {
+            //         dbg!(atom.name());
+            //     }
+            // }
+            // BeamChunkType::Export(export) => {
+            //     dbg!(export.export_count);
+            //     for func in export.functions {
+            //         dbg!(func.function_index);
+            //         dbg!(func.arity);
+            //         dbg!(func.label);
+            //     }
+            // }
+            // BeamChunkType::Import(import) => {
+            //     dbg!(import.import_count);
+            //     for func in import.functions {
+            //         dbg!(func.module_index);
+            //         dbg!(func.function_index);
+            //         dbg!(func.arity);
+            //     }
+            // }
             BeamChunkType::Code(code) => {
                 dbg!(code.function_count);
                 dbg!(code.instruction_set);
                 dbg!(code.label_count);
                 dbg!(code.op_code_max);
+                // println!(
+                //     "{}",
+                //     code.instructions
+                //         .iter()
+                //         .map(|x| x.to_string())
+                //         .collect::<Vec<_>>()
+                //         .join(", ")
+                // )
+                code.interpret_instructions();
             }
-            BeamChunkType::StringTable(strt) => {
-                dbg!(strt.data);
-            }
-            BeamChunkType::LiteralTable(litt) => {
-                let uncompressed = litt.uncompress();
-                for item in uncompressed.literal {
-                    dbg!(item.as_raw_term());
-                }
-            }
-            // continue: https://blog.stenmans.org/theBeamBook/#_literal_table_chunk
-            BeamChunkType::Other(id) => {
-                let tmp = GenericBeamChunk::from_bytes(next_needle).unwrap();
-                dbg!(chunk.name());
-                next_needle = tmp.0;
-                let chunk = tmp.1;
-                dbg!(chunk.size);
-                dbg!(chunk.data());
-                // dbg!(chunk);
-            }
+            // BeamChunkType::StringTable(strt) => {
+            //     dbg!(strt.data);
+            // }
+            // BeamChunkType::LiteralTable(litt) => {
+            //     let uncompressed = litt.uncompress();
+            //     for item in uncompressed.literal {
+            //         dbg!(item.as_raw_term());
+            //     }
+            // }
+            // // continue: https://blog.stenmans.org/theBeamBook/#code_chunk
+            // BeamChunkType::Other(id) => {
+            //     let tmp = GenericBeamChunk::from_bytes(next_needle).unwrap();
+            //     dbg!(chunk.name());
+            //     next_needle = tmp.0;
+            //     let chunk = tmp.1;
+            //     dbg!(chunk.size);
+            //     dbg!(chunk.data());
+            //     // dbg!(chunk);
+            // }
+            _ => {}
         }
 
         needle = next_needle;
